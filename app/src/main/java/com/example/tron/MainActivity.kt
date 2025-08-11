@@ -503,13 +503,13 @@ fun ServerSetupScreen(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Image(
-                        painter = painterResource(id = R.drawable.logo1),
+                        painter = painterResource(id = R.drawable.vichaar),
                         contentDescription = "Logo",
                         modifier = Modifier.size(120.dp)
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Image(
-                        painter = painterResource(id = R.drawable.logo2),
+                        painter = painterResource(id = R.drawable.vichaar),
                         contentDescription = "App Name",
                         modifier = Modifier.height(40.dp).wrapContentWidth()
                     )
@@ -623,7 +623,7 @@ fun LoginScreen(
                 exit = fadeOut() + slideOutVertically { -40 }
             ) {
                 Image(
-                    painter = painterResource(id = R.drawable.logo1), // Logo
+                    painter = painterResource(id = R.drawable.vichaar), // Logo
                     contentDescription = "Logo",
                     modifier = Modifier
                         .size(100.dp)
