@@ -57,6 +57,7 @@ dependencies {
     implementation ("androidx.compose.runtime:runtime-livedata:1.6.0" )// or latest
     implementation ("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation ("com.google.accompanist:accompanist-permissions:0.34.0" )// or latest
+    implementation ("androidx.work:work-runtime-ktx:2.7.1")
 
 
     // Compose BOM

@@ -8,6 +8,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.Address
 import android.location.Geocoder
 import android.net.Uri
 import android.os.Bundle
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +61,11 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.POST
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 // ---------------- THEME ----------------
@@ -807,6 +814,14 @@ fun DashboardScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val networkMonitor = remember { NetworkMonitor(context) }
+    val isOnline by networkMonitor.networkStatus.observeAsState(initial = true)
+
+    // Start monitoring when composable is first launched
+    LaunchedEffect(Unit) {
+        networkMonitor.startMonitoring()
+    }
+
     val username by sessionViewModel.username.collectAsState()
     val stafSl by sessionViewModel.staffSl.collectAsState()
     val deptName by sessionViewModel.deptName.collectAsState()
@@ -819,13 +834,13 @@ fun DashboardScreen(
     var trackingDuration by remember { mutableStateOf(0) }
     var lastLocation by remember { mutableStateOf<LocationData?>(null) }
     var locationHistory by remember { mutableStateOf<List<LocationData>>(emptyList()) }
+    var isSyncing by remember { mutableStateOf(false) }
 
     val permissionState = rememberMultiplePermissionsState(
         listOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
-
-            )
+        )
     )
 
     // Timer for tracking duration
@@ -876,13 +891,250 @@ fun DashboardScreen(
         }
     }
 
+
+    fun buildAddressFromComponents(address: Address): String {
+        val parts = mutableListOf<String>()
+
+        address.featureName?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+        address.thoroughfare?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+        address.subThoroughfare?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+        address.locality?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+        address.adminArea?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+        address.postalCode?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+        address.countryName?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+
+        return parts.joinToString(", ").takeIf { it.isNotBlank() } ?: "Unknown Address"
+    }
+
+    fun syncData() {
+        scope.launch {
+            isSyncing = true
+            try {
+                val database = AppDatabase.getInstance(context)
+                val repository = LocationRepository(database.locationDao())
+                val unsyncedLocations = repository.getUnsyncedLocations().first()
+
+                if (unsyncedLocations.isEmpty()) {
+                    showSnackbar(context, "No data to sync")
+                    return@launch
+                }
+
+                // Load client URL directly from DataStore
+                val clientUrl = try {
+                    val prefs = context.dataStore.data.first()
+                    prefs[stringPreferencesKey("client_url")] ?: ""
+                } catch (e: Exception) {
+                    Log.e("SyncData", "⚠️ Failed to load clientUrl: ${e.message}")
+                    ""
+                }
+
+                if (clientUrl.isBlank()) {
+                    showSnackbar(context, "No server configured")
+                    return@launch
+                }
+
+                var successfullySynced = 0
+                var failedCount = 0
+                var geocodingFailedCount = 0
+
+                // Sync locations one by one in sequence
+                for ((index, location) in unsyncedLocations.withIndex()) {
+                    try {
+                        Log.d("SyncData", "🔄 Syncing location ${index + 1}/${unsyncedLocations.size}")
+
+                        // Get location name using geocoder with retry logic
+                        var locationName: String? = null
+                        var geocodingAttempts = 0
+                        val maxGeocodingAttempts = 3
+
+                        while (locationName == null && geocodingAttempts < maxGeocodingAttempts) {
+                            geocodingAttempts++
+                            try {
+                                Log.d("SyncData", "🌐 Geocoding attempt $geocodingAttempts for location ${location.id}")
+
+                                val geocoder = Geocoder(context, Locale.getDefault())
+                                val addresses = geocoder.getFromLocation(
+                                    location.latitude,
+                                    location.longitude,
+                                    1
+                                )
+
+                                if (!addresses.isNullOrEmpty()) {
+                                    val address = addresses[0]
+                                    locationName = address.getAddressLine(0) ?: run {
+                                        // Try to build address from components if getAddressLine returns null
+                                        buildAddressFromComponents(address)
+                                    }
+
+                                    if (locationName.isNullOrBlank()) {
+                                        locationName = "Unknown Address"
+                                    } else {
+                                        Log.d("SyncData", "✅ Geocoding successful: $locationName")
+                                    }
+                                } else {
+                                    locationName = "Unknown Address"
+                                }
+
+                                // Small delay after successful geocoding
+                                delay(100)
+
+                            } catch (e: Exception) {
+                                Log.w("SyncData", "🌐 Geocoding attempt $geocodingAttempts failed: ${e.message}")
+                                if (geocodingAttempts == maxGeocodingAttempts) {
+                                    locationName = "Location Error - Geocoding Failed"
+                                } else {
+                                    // Exponential backoff for retries
+                                    delay(1000L * geocodingAttempts)
+                                }
+                            }
+                        }
+
+                        // If we still don't have a valid location name, skip this location
+                        if (locationName == null || locationName == "Location Error - Geocoding Failed") {
+                            geocodingFailedCount++
+                            Log.e("SyncData", "❌ Geocoding completely failed for location ${location.id}")
+                            continue // Skip to next location
+                        }
+
+                        val fullUrl = if (clientUrl.endsWith("/")) {
+                            clientUrl + "api/livelocation"
+                        } else {
+                            "$clientUrl/api/livelocation"
+                        }
+
+                        val url = URL(fullUrl)
+                        val conn = url.openConnection() as HttpURLConnection
+
+                        conn.requestMethod = "POST"
+                        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                        conn.setRequestProperty("Accept", "application/json")
+                        conn.doOutput = true
+                        conn.connectTimeout = 15000 // Increased timeout
+                        conn.readTimeout = 15000
+
+                        val sdfDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                        val sdfTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()) // Added seconds
+                        val now = Date(location.timestamp)
+                        val sdfTripId = SimpleDateFormat("yyyyMMddHHmmss", Locale.getDefault())
+                        val tripId = sdfTripId.format(now).toLong()
+
+                        // Escape JSON special characters in locationName
+                        val escapedLocationName = locationName!!.replace("\"", "\\\"")
+                            .replace("\n", " ")
+                            .replace("\r", " ")
+                            .trim()
+
+                        val jsonBody = """
+                    {
+                        "staf_sl": "${location.staffSl}",
+                        "log_dt": "${sdfDate.format(now)}",
+                        "log_time": "${sdfTime.format(now)}",
+                        "log_longitude": "${location.longitude}",
+                        "log_lattitude": "${location.latitude}",
+                        "log_location": "$escapedLocationName",
+                        "trip_id": $tripId
+                    }
+                """.trimIndent()
+
+                        Log.d("SyncData", "📤 Sending JSON: $jsonBody")
+
+                        OutputStreamWriter(conn.outputStream, "UTF-8").use { writer ->
+                            writer.write(jsonBody)
+                            writer.flush()
+                        }
+
+                        val responseCode = conn.responseCode
+                        val inputStream = if (responseCode in 200..299) conn.inputStream else conn.errorStream
+                        val response = inputStream.bufferedReader().use { it.readText() }
+
+                        Log.d("SyncData", "📡 API response [$responseCode]: $response")
+
+                        // More robust success detection
+                        val isSuccess = responseCode in 200..299 &&
+                                (response.contains("\"status\":\"success\"") ||
+                                        response.contains("\"status\":\"Success\"") ||
+                                        response.contains("\"success\":true") ||
+                                        response.contains("'status':'success'"))
+
+                        if (isSuccess) {
+                            successfullySynced++
+                            repository.markLocationsAsSynced(listOf(location.id))
+                            Log.d("SyncData", "✅ Successfully synced location ${location.id}")
+                        } else {
+                            failedCount++
+                            Log.e("SyncData", "❌ Failed to sync location ${location.id}: $responseCode - $response")
+                        }
+
+                        // Variable delay based on success/failure
+                        val delayTime = if (isSuccess) 300L else 1000L
+                        delay(delayTime)
+
+                    } catch (e: Exception) {
+                        failedCount++
+                        Log.e("SyncData", "❌ Error syncing location ${location.id}: ${e.message}", e)
+                        // Longer delay on error
+                        delay(2000L)
+                    }
+                }
+
+                val message = buildString {
+                    if (successfullySynced > 0) {
+                        append("Synced $successfullySynced locations")
+                    }
+                    if (failedCount > 0) {
+                        if (isNotEmpty()) append(", ")
+                        append("$failedCount failed")
+                    }
+                    if (geocodingFailedCount > 0) {
+                        if (isNotEmpty()) append(", ")
+                        append("$geocodingFailedCount geocoding failed")
+                    }
+                    if (isEmpty()) {
+                        append("No locations processed")
+                    }
+                }
+
+                showSnackbar(context, message)
+
+            } catch (e: Exception) {
+                Log.e("SyncData", "❌ Sync process failed: ${e.message}", e)
+                showSnackbar(context, "Sync failed: ${e.message}")
+            } finally {
+                isSyncing = false
+            }
+        }
+    }
+
+
+
     Scaffold(
         modifier = modifier,
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Location Tracker") },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Location Tracker")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        // Network status indicator
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(
+                                    color = if (isOnline) Color.Green else Color.Red,
+                                    shape = CircleShape
+                                )
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(),
                 actions = {
+                    if (!isOnline) {
+                        Text(
+                            "Offline",
+                            color = Color.Red,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                    }
                     IconButton(onClick = { toggleTracking(context, stafSl) }) {
                         Icon(
                             imageVector = if (isTrackingActive) Icons.Default.LocationOn else Icons.Default.LocationOff,
@@ -896,13 +1148,36 @@ fun DashboardScreen(
                 }
             )
         },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { /* SOS action */ },
-                icon = { Icon(Icons.Default.Emergency, contentDescription = null) },
-                text = { Text("SOS") }
-            )
-        }
+
+//        bottomBar = {
+//            // Simple Sync Button at the bottom
+//            BottomAppBar {
+//                Button(
+//                    onClick = { syncData() },
+//                    modifier = Modifier
+//                        .fillMaxWidth()
+//                        .padding(horizontal = 16.dp, vertical = 8.dp),
+//                    enabled = !isSyncing,
+//                    colors = ButtonDefaults.buttonColors(
+//                        containerColor = MaterialTheme.colorScheme.primary,
+//                        contentColor = MaterialTheme.colorScheme.onPrimary
+//                    )
+//                ) {
+//                    if (isSyncing) {
+//                        CircularProgressIndicator(
+//                            modifier = Modifier.size(20.dp),
+//                            strokeWidth = 2.dp,
+//                            color = MaterialTheme.colorScheme.onPrimary
+//                        )
+//                        Spacer(modifier = Modifier.width(8.dp))
+//                    }
+//                    Text(
+//                        text = if (isSyncing) "Syncing..." else "Sync Data",
+//                        style = MaterialTheme.typography.labelLarge
+//                    )
+//                }
+//            }
+//        }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -958,6 +1233,7 @@ fun DashboardScreen(
                         LocationDetailItem(it)
                     }
 
+                    // Button Row 1: Start/Stop and Logout
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
@@ -975,6 +1251,44 @@ fun DashboardScreen(
                         ) {
                             Text("Logout")
                         }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // Button Row 2: Sync Data button
+                    Button(
+                        onClick = { syncData() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        enabled = !isSyncing,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary,
+                            contentColor = MaterialTheme.colorScheme.onSecondary
+                        )
+                    ) {
+                        if (isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onSecondary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Text(
+                            text = if (isSyncing) "Syncing Data..." else "Sync Data Now",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+
+                    // Show sync status if syncing
+                    if (isSyncing) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Syncing your location data to server",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
                     }
                 }
             }
