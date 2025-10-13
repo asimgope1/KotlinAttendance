@@ -32,8 +32,10 @@ class MyForegroundService : Service() {
     private var staffSl: String = "unknown"
     private var clientUrl: String = ""
     private val serviceScope = CoroutineScope(Dispatchers.Main)
+    private var tripPurpose: String = "" // Add this variable
 
-//    private val Context.dataStore by preferencesDataStore(name = "settings")
+    private var tripId: Int = 0
+
     private val CLIENT_URL = stringPreferencesKey("client_url")
 
     override fun onCreate() {
@@ -42,9 +44,12 @@ class MyForegroundService : Service() {
         handler = Handler(Looper.getMainLooper())
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
     }
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         staffSl = intent?.getStringExtra("staf_sl") ?: "unknown"
+        tripPurpose = intent?.getStringExtra("purpose") ?: "" // Get purpose from intent
+
+        // ✅ Generate tripId once per service lifecycle
+        tripId = (System.currentTimeMillis() / 1000).toInt()
 
         serviceScope.launch {
             try {
@@ -199,15 +204,18 @@ class MyForegroundService : Service() {
                 val sdfTime = SimpleDateFormat("HH:mm", Locale.getDefault())
                 val now = Date()
 
+                // ✅ Reuse the same tripId for every request until service restarts
                 val jsonBody = """
-                    {
-                        "staf_sl": "$staffSl",
-                        "log_dt": "${sdfDate.format(now)}",
-                        "log_time": "${sdfTime.format(now)}",
-                        "log_longitude": "$longitude",
-                        "log_lattitude": "$latitude",
-                        "log_location": "$cityName"
-                    }
+                {
+                    "staf_sl": "$staffSl",
+                    "log_dt": "${sdfDate.format(now)}",
+                    "log_time": "${sdfTime.format(now)}",
+                    "log_longitude": "$longitude",
+                    "log_lattitude": "$latitude",
+                    "log_location": "$cityName",
+                    "trip_id": $tripId,
+                    "trip_detail": "$tripPurpose"
+                }
                 """.trimIndent()
 
                 Log.d("MyForegroundService", "📦 Request body: $jsonBody")
@@ -222,7 +230,7 @@ class MyForegroundService : Service() {
                 val response = inputStream.bufferedReader().use { it.readText() }
 
                 Log.d("MyForegroundService", "✅ API response [$responseCode]: $response")
-                Log.d("MyForegroundService", "📌 Sent city: $cityName")
+                Log.d("MyForegroundService", "📌 Sent city: $cityName | Trip ID: $tripId")
 
             } catch (e: Exception) {
                 Log.e("MyForegroundService", "❌ API request failed: ${e.message}", e)

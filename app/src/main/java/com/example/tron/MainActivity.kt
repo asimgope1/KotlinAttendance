@@ -1,19 +1,17 @@
 package com.example.tron
 
 import android.app.Application
-import com.google.accompanist.permissions.rememberMultiplePermissionsState
-import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import android.os.Build
-import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
+import android.Manifest
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -51,7 +49,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.*
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.*
-import com.google.accompanist.permissions.MultiplePermissionsState
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -130,10 +129,10 @@ data class StaffData(
     val loc_cd: Int?,
     val div_sl: Int?,
     val staf_nm: String?,
-    val emp_code: String?,        // must be String
+    val emp_code: String?,
     val device_code: String?,
-    val trackon: String?,         // nullable
-    val r_usr_sl: String?,        // nullable
+    val trackon: String?,
+    val r_usr_sl: String?,
     val staf_image: String?,
     val tot: Int?,
     val PRESENT: Double?,
@@ -156,7 +155,6 @@ data class StaffInfo(
     val emp_code: String?,
     val present_per: Double?
 )
-
 
 class SessionViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -359,7 +357,6 @@ fun requestIgnoreBatteryOptimizations(context: Context) {
     }
 }
 
-
 suspend fun validateCompanyCode(
     code: String,
     vm: SessionViewModel,
@@ -376,7 +373,7 @@ suspend fun validateCompanyCode(
 
     try {
         val retrofit = Retrofit.Builder()
-            .baseUrl("https://protimes.co.in/") // default base URL to call validateCompany
+            .baseUrl("https://protimes.co.in/")
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(ApiService::class.java)
@@ -385,16 +382,13 @@ suspend fun validateCompanyCode(
         val clientUrl = response.data_value.firstOrNull()?.client_url
 
         if (response.status == "success" && !clientUrl.isNullOrBlank()) {
-            // ✅ Save to DataStore via ViewModel
             vm.saveClientUrl(clientUrl)
-
             Log.d("validateCompanyCode", "✅ client_url saved: $clientUrl")
             Toast.makeText(ctx, "Company verified successfully", Toast.LENGTH_SHORT).show()
             onSuccess()
         } else {
             Toast.makeText(ctx, "Invalid company code", Toast.LENGTH_SHORT).show()
         }
-
     } catch (e: Exception) {
         Log.e("validateCompanyCode", "❌ Validation failed", e)
         Toast.makeText(ctx, "Network error. Try again.", Toast.LENGTH_SHORT).show()
@@ -402,8 +396,6 @@ suspend fun validateCompanyCode(
         setLoading(false)
     }
 }
-
-
 
 // ---------------- SCREENS ----------------
 @OptIn(ExperimentalMaterial3Api::class)
@@ -419,7 +411,6 @@ fun ServerSetupScreen(
     var code by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
 
-    // 🔹 Launcher for background location (Android Q+)
     val backgroundPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -431,7 +422,6 @@ fun ServerSetupScreen(
         }
     }
 
-    // 🔹 Launcher for fine + coarse location
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -440,19 +430,16 @@ fun ServerSetupScreen(
 
         if (fineGranted || coarseGranted) {
             Toast.makeText(ctx, "Location permission granted", Toast.LENGTH_SHORT).show()
-
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 backgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
             } else {
                 requestIgnoreBatteryOptimizations(ctx)
             }
-
         } else {
             Toast.makeText(ctx, "Location permission denied", Toast.LENGTH_LONG).show()
         }
     }
 
-    // 🔹 Launch permissions on first load
     LaunchedEffect(Unit) {
         val fineGranted = ContextCompat.checkSelfPermission(
             ctx,
@@ -484,7 +471,6 @@ fun ServerSetupScreen(
         }
     }
 
-    // 🔹 UI Layout
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -587,7 +573,6 @@ fun ServerSetupScreen(
     }
 }
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginScreen(
@@ -616,17 +601,15 @@ fun LoginScreen(
                 .align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Animated logo/icon
             AnimatedVisibility(
                 visible = true,
                 enter = fadeIn() + slideInVertically { -40 },
                 exit = fadeOut() + slideOutVertically { -40 }
             ) {
                 Image(
-                    painter = painterResource(id = R.drawable.logo1), // Logo
+                    painter = painterResource(id = R.drawable.logo1),
                     contentDescription = "Logo",
-                    modifier = Modifier
-                        .size(100.dp)
+                    modifier = Modifier.size(100.dp)
                 )
             }
 
@@ -678,7 +661,6 @@ fun LoginScreen(
                 trailingIcon = {
                     val icon = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff
                     val desc = if (passwordVisible) "Hide password" else "Show password"
-
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
                         Icon(imageVector = icon, contentDescription = desc)
                     }
@@ -695,7 +677,6 @@ fun LoginScreen(
                 )
             )
 
-
             Spacer(modifier = Modifier.height(24.dp))
 
             Box(
@@ -706,8 +687,8 @@ fun LoginScreen(
                     .background(
                         brush = Brush.horizontalGradient(
                             colors = listOf(
-                                Color(0xFFB4000A), // #b4000a
-                                Color(0xFFFF6347)  // #ff6347
+                                Color(0xFFB4000A),
+                                Color(0xFFFF6347)
                             )
                         )
                     )
@@ -716,7 +697,6 @@ fun LoginScreen(
                             showSnackbar(ctx, "Please enter both credentials")
                             return@clickable
                         }
-
                         scope.launch {
                             isLoading = true
                             try {
@@ -724,22 +704,17 @@ fun LoginScreen(
                                     showSnackbar(ctx, "No client URL configured")
                                     return@launch
                                 }
-
                                 val retrofit = Retrofit.Builder()
                                     .baseUrl(clientUrl!!)
                                     .addConverterFactory(GsonConverterFactory.create())
                                     .build()
                                     .create(ApiService::class.java)
-
-
                                 val res = retrofit.login(LoginRequest(user, pass))
-                                Log.d("here i am 2", res.toString())
                                 val name = res.data.firstOrNull()?.staf_nm
                                 val staffData = res.data.firstOrNull()
                                 if (res.status == "success" && name != null) {
-                                    val staffData = res.data.firstOrNull()
                                     staffData?.let {
-                                        vm.saveStaffDetails(it)  // Save all data to DataStore
+                                        vm.saveStaffDetails(it)
                                         vm.saveStaffInfo(
                                             StaffInfo(
                                                 staf_sl = staffData.staf_sl,
@@ -753,7 +728,7 @@ fun LoginScreen(
                                     }
                                     vm.setLoginState(true)
                                     onLogin()
-                                }else {
+                                } else {
                                     showSnackbar(ctx, "Invalid credentials")
                                 }
                             } catch (e: Exception) {
@@ -780,7 +755,6 @@ fun LoginScreen(
                     )
                 }
             }
-
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -815,6 +789,8 @@ fun DashboardScreen(
     val startTimeMillis by sessionViewModel.trackingStartTime.collectAsState()
 
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var showPurposeDialog by remember { mutableStateOf(false) }
+    var purposeText by remember { mutableStateOf("") }
     var isTrackingActive by rememberSaveable { mutableStateOf(trackingFromStore) }
     var trackingDuration by remember { mutableStateOf(0) }
     var lastLocation by remember { mutableStateOf<LocationData?>(null) }
@@ -824,8 +800,7 @@ fun DashboardScreen(
         listOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
-
-            )
+        )
     )
 
     // Timer for tracking duration
@@ -837,9 +812,10 @@ fun DashboardScreen(
         }
     }
 
-    fun toggleTracking(context: Context, staffSl: String?) {
+    fun toggleTracking(context: Context, staffSl: String?, purpose: String) {
         val intent = Intent(context, MyForegroundService::class.java).apply {
             putExtra("staf_sl", staffSl)
+            putExtra("purpose", purpose) // Add purpose to intent
         }
 
         if (isTrackingActive) {
@@ -883,7 +859,7 @@ fun DashboardScreen(
                 title = { Text("Location Tracker") },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(),
                 actions = {
-                    IconButton(onClick = { toggleTracking(context, stafSl) }) {
+                    IconButton(onClick = { toggleTracking(context, stafSl,purposeText) }) {
                         Icon(
                             imageVector = if (isTrackingActive) Icons.Default.LocationOn else Icons.Default.LocationOff,
                             contentDescription = "Toggle Tracking",
@@ -963,7 +939,13 @@ fun DashboardScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Button(
-                            onClick = { toggleTracking(context, stafSl) },
+                            onClick = {
+                                if (isTrackingActive) {
+                                    toggleTracking(context, stafSl, purposeText)
+                                } else {
+                                    showPurposeDialog = true
+                                }
+                            },
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(if (isTrackingActive) "Stop" else "Start")
@@ -1025,9 +1007,74 @@ fun DashboardScreen(
             icon = { Icon(Icons.Default.Logout, contentDescription = null) }
         )
     }
+
+    if (showPurposeDialog) {
+        AlertDialog(
+            onDismissRequest = { showPurposeDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (purposeText.isNotBlank()) {
+                            toggleTracking(context, stafSl, purposeText)
+                            showPurposeDialog = false
+                            purposeText = ""
+                        } else {
+                            showSnackbar(context, "Please enter a purpose")
+                        }
+                    },
+                    enabled = purposeText.isNotBlank()
+                ) {
+                    Text("Start")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showPurposeDialog = false
+                    purposeText = ""
+                }) {
+                    Text("Cancel")
+                }
+            },
+            title = { Text("Enter Trip Details") },
+            text = {
+                Column {
+                    Text("Please provide details for this tracking session:")
+                    Spacer(Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = purposeText,
+                        onValueChange = { purposeText = it },
+                        label = { Text("Trip Purpose/Details *") },
+                        placeholder = { Text("e.g., Visit to ---, Client meeting, etc.") },
+
+                        singleLine = false,
+                        maxLines = 3,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                if (purposeText.isNotBlank()) {
+                                    toggleTracking(context, stafSl, purposeText)
+                                    showPurposeDialog = false
+                                    purposeText = ""
+                                } else {
+                                    showSnackbar(context, "Please enter a purpose")
+                                }
+                            }
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "* This information will be sent with your location data",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+            },
+            icon = { Icon(Icons.Default.Info, contentDescription = null) }
+        )
+    }
 }
-
-
 
 @Composable
 private fun LocationDetailItem(location: LocationData) {
@@ -1205,8 +1252,6 @@ private fun getCityName(context: Context, latitude: Double, longitude: Double): 
         "Location Error"
     }
 }
-
-
 
 private fun showSnackbar(context: Context, message: String) {
     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
