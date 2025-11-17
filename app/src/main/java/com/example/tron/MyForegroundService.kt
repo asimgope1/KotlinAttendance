@@ -3,6 +3,8 @@ package com.example.tron
 import android.Manifest
 import android.app.*
 import android.content.Context
+import android.app.Service
+import android.os.IBinder
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Geocoder
@@ -37,7 +39,6 @@ class MyForegroundService : Service() {
     private var tripId: Int = 0
 
     private val CLIENT_URL = stringPreferencesKey("client_url")
-
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
