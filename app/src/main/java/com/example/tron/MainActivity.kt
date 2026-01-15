@@ -254,7 +254,8 @@ data class TripDetail(
     val Location: String = "",    // This might be redundant with TravelFrom/TravelTo
     val TourId: Int? = null,
     val ApprovedTotalKM: String = "",
-    val WorkTime: String = ""
+    val WorkTime: String = "",
+    val travel_type: String = "Local" // ADD THIS FIELD
 )
 
 // In your Tour data class, ensure RequestAdvance is Int
@@ -267,14 +268,13 @@ data class Tour(
     val TourTo: String = "",
     val TourFromTime: String = "",
     val TourToTime: String = "",
-    val RequestAdvance: Int = 0, // This should be Int (0 or 1)
+    val RequestAdvance: Int = 0,
     val RequestedAdvanceAmount: String = "",
     val StageSl: Int? = null,
     val StageName: String? = null,
     val loc_cd: String? = null,
     val staf_sl: String? = null,
-    val TourType: String = "Local" // Change from String? to String with default
-
+    val TourType: String = "Local" // This should already be here
 )
 
 data class Expense(
@@ -319,6 +319,7 @@ data class TourDetail(
     val TourId: Int,
     val ActionName: String,
     val Advance_Request: String,
+    val TourType: String? = null, // ADD THIS LINE
     val travel_details: List<TravelDetail>,
     val expense_details: List<ExpenseDetail>,
     val logs_details: List<LogDetail>
@@ -339,9 +340,9 @@ data class TravelDetail(
     val ApprovedTotalKM: String,
     val ApprovedWorkTime: String,
     val WorkTime: String,
-    val TourId: Int
+    val TourId: Int,
+    val TravelType: String? = null // ADD THIS FIELD
 )
-
 
 
 
@@ -426,6 +427,19 @@ data class ExpenseItem(
 data class ApiResponse(
     val Status: String,
     val Message: String
+)
+
+
+// Add these data classes to your existing data classes section
+data class TravelModeResponse(
+    val status: String,
+    val Code: String,
+    val msg: String,
+    val data_value: List<TravelModeItem>
+)
+
+data class TravelModeItem(
+    val TravelMode: String
 )
 
 class SessionViewModel(app: Application) : AndroidViewModel(app) {
@@ -670,8 +684,17 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
     var isLoadingDetails by mutableStateOf(false)
         private set
 
+    // STEP 1: ADD THESE NEW LOADING STATES
+    var isCreatingTour by mutableStateOf(false)
+        private set
+    var isUpdatingTour by mutableStateOf(false)
+        private set
+
     var tourList by mutableStateOf<List<Tour>>(emptyList())
         private set
+
+
+
 
     var locations by mutableStateOf<List<LocationItem>>(emptyList())
         private set
@@ -686,6 +709,9 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     var expenseDetails by mutableStateOf<List<Expense>>(emptyList())
+        private set
+    // ADD THIS LINE - Add travelModes state
+    var travelModes by mutableStateOf<List<TravelModeItem>>(emptyList())
         private set
 
 
@@ -790,7 +816,7 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
 
 
     suspend fun fetchTourDetails(tourId: Int, clientUrl: String) {
-        isLoadingDetails = true // Set loading to true when starting
+        isLoadingDetails = true
         try {
             val apiService = getApiService(clientUrl)
             val response = apiService.getTourDetails(tourId)
@@ -799,16 +825,19 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
             if (response.status == "success" && response.data_value.isNotEmpty()) {
                 val tourDetail = response.data_value[0]
 
-                // Convert to Tour object with proper date parsing
+                // Use the main TourType if available, otherwise determine from travel details
+                val mainTourType = tourDetail.TourType ?: "Local"
+                Log.d("TourViewModel", "Main TourType: $mainTourType")
+
                 // Convert to Tour object with proper date parsing
                 val tour = Tour(
                     TourId = tourDetail.TourId,
                     Sl = tourDetail.TourId,
                     TourTittle = tourDetail.TourTittle,
                     TourDescription = tourDetail.TourDescription,
-                    TourFrom = parseApiDate(tourDetail.TourFrom), // Now handles DD/MM/YYYY
+                    TourFrom = parseApiDate(tourDetail.TourFrom),
                     TourTo = parseApiDate(tourDetail.TourTo),
-                    TourFromTime = parseApiTime(tourDetail.TourFromTime), // Convert 24h to 12h
+                    TourFromTime = parseApiTime(tourDetail.TourFromTime),
                     TourToTime = parseApiTime(tourDetail.TourToTime),
                     RequestAdvance = tourDetail.RequestAdvance,
                     RequestedAdvanceAmount = tourDetail.RequestedAdvanceAmount.toString(),
@@ -816,14 +845,14 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
                     StageName = tourDetail.Advance_Request,
                     loc_cd = "", // You might need to get this from session
                     staf_sl = "", // You might need to get this from session
-                    TourType = "Local" // Add default value
+                    TourType = mainTourType // Use the main tour type
                 )
 
-                // Convert travel details to TripDetail list
+                // Convert travel details to TripDetail list with individual travel types
                 val tripDetails = tourDetail.travel_details.map { travel ->
                     TripDetail(
                         sl = travel.sl,
-                        TravelDate = parseApiDateForDisplay(travel.dt), // Format: "10/10/2025" to "2025-10-10"
+                        TravelDate = parseApiDateForDisplay(travel.dt),
                         TravelFrom = travel.ft,
                         TravelTo = travel.tt,
                         TravelMode = travel.TravelMode,
@@ -834,7 +863,8 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
                         Location = travel.Location,
                         TourId = travel.TourId,
                         ApprovedTotalKM = travel.ApprovedTotalKM.trim(),
-                        WorkTime = travel.WorkTime.trim()
+                        WorkTime = travel.WorkTime.trim(),
+                        travel_type = travel.TravelType ?: mainTourType // Use individual travel type or fallback to main
                     )
                 }
 
@@ -862,16 +892,15 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
                 this.expenseDetails = expenseDetails
 
                 Log.d("TourViewModel", "Loaded ${tripDetails.size} trip details")
-                Log.d("TourViewModel", "Loaded ${expenseDetails.size} expense details")
+                Log.d("TourViewModel", "Trip details travel types: ${tripDetails.map { it.travel_type }}")
+                Log.d("TourViewModel", "Final Tour Type: ${tour.TourType}")
             }
         } catch (e: Exception) {
             Log.e("TourViewModel", "Error fetching tour details", e)
-        }
-        finally {
+        } finally {
             isLoadingDetails = false
         }
     }
-
 
 
     // Existing function for Tour dates
@@ -889,6 +918,42 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+
+
+    fun fetchTravelModes(clientUrl: String) {
+        viewModelScope.launch {
+            try {
+                val apiService = getApiService(clientUrl)
+                val response = apiService.getTravelModes()
+                if (response.status == "success") {
+                    travelModes = response.data_value
+                    Log.d("TourViewModel", "Fetched ${travelModes.size} travel modes")
+                } else {
+                    Log.e("TourViewModel", "Failed to fetch travel modes")
+                    // Fallback to default modes
+                    setDefaultTravelModes()
+                }
+            } catch (e: Exception) {
+                Log.e("TourViewModel", "Error fetching travel modes", e)
+                // Fallback to default modes
+                setDefaultTravelModes()
+            }
+        }
+    }
+
+    // ADD THIS FUNCTION - Fallback travel modes
+    private fun setDefaultTravelModes() {
+        travelModes = listOf(
+            TravelModeItem("Bike"),
+            TravelModeItem("Taxi"),
+            TravelModeItem("Car"),
+            TravelModeItem("Auto"),
+            TravelModeItem("Bus"),
+            TravelModeItem("Train")
+        )
+    }
+
 
 
     fun fetchExpenses(staffSl: String, clientUrl: String) {
@@ -961,6 +1026,7 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
         expenseDetails: List<Expense>,
         clientUrl: String
     ): TourResult {
+        isCreatingTour = true
         loading = true
         return try {
             val validationError = validateExpenses(expenseDetails, expenses)
@@ -971,6 +1037,7 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
 
             val apiService = getApiService(clientUrl)
 
+            // Build travel list with individual travel types
             val travelList = tripDetails.map { trip ->
                 """{ 
      "TravelDate": "${trip.TravelDate}", 
@@ -981,8 +1048,8 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
      "Particular": "${trip.Particular}", 
      "NightHalt": "${trip.NightHalt}", 
      "TierSl": ${trip.TierSl}, 
-     "Location": "${trip.Location}" ,
-     "travel_type": "${tour.TourType ?: "Local"}"
+     "Location": "${trip.Location}",
+     "travel_type": "${trip.travel_type}"
    }"""
             }
 
@@ -997,12 +1064,14 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
  "RequestAdvance": ${tour.RequestAdvance}, 
  "RequestedAdvanceAmount": ${tour.RequestedAdvanceAmount.toIntOrNull() ?: 0}, 
  "loc_cd": "${tour.loc_cd ?: "1"}", 
+ "TourType": "${tour.TourType}", 
  "TourTravel": [${travelList.joinToString(",")}]
 }"""
 
+            Log.d("TourViewModel", "Create Tour Request: ${jsonContent}")
+
             val tourDataBody = jsonContent.toRequestBody("text/plain".toMediaTypeOrNull())
             val expenseParts = buildExpensePartsForCreate(expenseDetails)
-            Log.d("TourViewModel", "Create Tour Response: ${jsonContent}")
 
             val response = apiService.createTourWithCompleteRequest(tourDataBody, expenseParts)
             Log.d("TourViewModel", "Create Tour Response: ${response.Status} - ${response.Message}")
@@ -1017,6 +1086,7 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
             Log.e("TourViewModel", "Error creating tour", e)
             TourResult(false, e.localizedMessage ?: "An unexpected error occurred.")
         } finally {
+            isCreatingTour = false
             loading = false
         }
     }
@@ -1030,10 +1100,12 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
         clientUrl: String,
         context: Context
     ): TourResult {
+        isUpdatingTour = true
+        loading = true
         return try {
             val api = getApiService(clientUrl)
 
-            // ✅ Build travel list
+            // Build travel list with individual travel types
             val travelList = tripDetails.map { trip ->
                 """{
                 "TravelDate": "${trip.TravelDate}",
@@ -1045,25 +1117,25 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
                 "NightHalt": "${trip.NightHalt}",
                 "TierSl": ${trip.TierSl},
                 "Location": "${trip.Location}",
-                "travel_type": "${tour.TourType ?: "Local"}"
+                "travel_type": "${trip.travel_type}"
             }"""
             }
 
             val jsonContent = """{
-            "staf_sl": ${tour.staf_sl?.toIntOrNull() ?: 1},
-            "TourTittle": "${tour.TourTittle}",
-            "TourDescription": "${tour.TourDescription}",
-            "TourFrom": "${tour.TourFrom}",
-            "TourFromTime": "${formatTimeForApi(tour.TourFromTime)}",
-            "TourTo": "${tour.TourTo}",
-            "TourToTime": "${formatTimeForApi(tour.TourToTime)}",
-            "RequestAdvance": ${tour.RequestAdvance},
-            "RequestedAdvanceAmount": ${tour.RequestedAdvanceAmount.toDoubleOrNull() ?: 0.0},
-            "loc_cd": "${tour.loc_cd ?: "1"}",
-            "TourTravel": [${travelList.joinToString(",")}],
-            "TourType": "${tour.TourType}"
-        }"""
-            Log.d("TourViewModel", "Create Tour Response: ${jsonContent}")
+ "staf_sl": ${tour.staf_sl?.toIntOrNull() ?: 1},
+ "TourTittle": "${tour.TourTittle}",
+ "TourDescription": "${tour.TourDescription}",
+ "TourFrom": "${tour.TourFrom}",
+ "TourFromTime": "${formatTimeForApi(tour.TourFromTime)}",
+ "TourTo": "${tour.TourTo}",
+ "TourToTime": "${formatTimeForApi(tour.TourToTime)}",
+ "RequestAdvance": ${tour.RequestAdvance},
+ "RequestedAdvanceAmount": ${tour.RequestedAdvanceAmount.toDoubleOrNull() ?: 0.0},
+ "loc_cd": "${tour.loc_cd ?: "1"}",
+ "TourTravel": [${travelList.joinToString(",")}],
+ "TourType": "${tour.TourType}"
+}"""
+            Log.d("TourViewModel", "Update Tour Request: ${jsonContent}")
 
             val tourDataBody = jsonContent.toRequestBody("text/plain".toMediaTypeOrNull())
             val expenseParts = buildExpensePartsForUpdate(expenseDetails)
@@ -1074,7 +1146,6 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
             val isSuccess = parseApiResponse(resultString)
             val message = extractMessageFromResponse(resultString)
 
-            // ✅ Return proper TourResult
             if (isSuccess) {
                 TourResult(true, message ?: "Tour updated successfully.")
             } else {
@@ -1090,6 +1161,9 @@ class TourViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             Log.e("TourViewModel", "❌ Unexpected error updating tour", e)
             TourResult(false, "Unexpected error: ${e.message}")
+        } finally {
+            isUpdatingTour = false
+            loading = false
         }
     }
 
@@ -1455,6 +1529,12 @@ interface TourApiService {
         @Query("TourId") tourId: Int
     ): TourDetailResponse
 
+
+
+    @GET("api/GetTourTravelMode")
+    suspend fun getTravelModes(): TravelModeResponse
+
+
     // FIXED: Change from POST to GET with Query parameters
     @GET("api/tourlocationlist")
     suspend fun getLocations(@Query("loc_cd") locCd: String): LocationResponse
@@ -1560,6 +1640,14 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             // Final fallback - generate random ID
             "android_${System.currentTimeMillis()}"
+        }
+    }
+
+    // Add this function to your MainActivity class
+    fun getDeviceIdForDisplay(): String {
+        return deviceIdentifier.ifEmpty {
+            getSharedPreferences("device_prefs", Context.MODE_PRIVATE)
+                .getString("device_id", "") ?: getAndroidId()
         }
     }
 
@@ -1801,6 +1889,8 @@ fun TourScreen(
                         TourFormScreen(
                             editMode = editMode,
                             currentTour = tourViewModel.currentTour,
+                            travelModes = tourViewModel.travelModes, // ADD THIS LINE
+
                             initialTripDetails = tourViewModel.tripDetails,
                             initialExpenseDetails = tourViewModel.expenseDetails,
                             locations = tourViewModel.locations,
@@ -1878,6 +1968,53 @@ fun LoadingOverlay(modifier: Modifier = Modifier) {
     }
 }
 
+
+// STEP 6: CREATE LOADING OVERLAY COMPOSABLE
+@Composable
+fun SavingTourOverlay(
+    message: String = "Saving Tour...",
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.7f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .width(280.dp)
+                .padding(16.dp),
+            elevation = CardDefaults.cardElevation(8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(48.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    strokeWidth = 3.dp
+                )
+
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center
+                )
+
+                Text(
+                    text = "Please wait while we process your request",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
 // ---------------- SIMPLIFIED TOUR LIST SCREEN ----------------
 @Composable
 fun TourListScreen(
@@ -2221,6 +2358,7 @@ fun TourFormScreen(
     initialExpenseDetails: List<Expense>,
     locations: List<LocationItem>,
     expenses: List<ExpenseItem>,
+    travelModes: List<TravelModeItem>, // ADD THIS PARAMETER
     onSaveTour: (Tour, List<TripDetail>, List<Expense>) -> Unit,
     modifier: Modifier = Modifier,
     sessionViewModel: SessionViewModel = viewModel(),
@@ -2230,6 +2368,7 @@ fun TourFormScreen(
     val scope = rememberCoroutineScope()
     val staffSl by sessionViewModel.staffSl.collectAsState()
     val locCd by sessionViewModel.locCd.collectAsState()
+
 
 
     val clientUrl by sessionViewModel.clientUrl.collectAsState() // Add clientUrl collection
@@ -2279,6 +2418,13 @@ fun TourFormScreen(
         tourType = currentTour?.TourType ?: "Local" // ADD THIS LINE
     }
 
+
+
+    LaunchedEffect(Unit) {
+        clientUrl?.let { url ->
+            tourViewModel.fetchTravelModes(url)
+        }
+    }
     LaunchedEffect(Unit) {
         staffSl?.let { sl ->
             locCd?.let { loc ->
@@ -2675,6 +2821,9 @@ fun TourFormScreen(
                 tripDetail = tripDetail,
                 currentTour = tourViewModel.currentTour,
                 locations = locations,
+                travelModes = travelModes,
+                tourType = tourType, // PASS THE MAIN FORM'S TOUR TYPE
+                onTourTypeChange = { newType -> tourType = newType }, // CALLBACK TO UPDATE MAIN FORM
                 onSave = { updatedDetail ->
                     val updatedList = tripDetails.toMutableList()
                     if (index in updatedList.indices) {
@@ -2820,6 +2969,9 @@ fun TripDetailEditDialog(
     tripDetail: TripDetail,
     currentTour: Tour?,
     locations: List<LocationItem>,
+    travelModes: List<TravelModeItem>, // ADD THIS PARAMETER
+    tourType: String, // ADD THIS PARAMETER
+    onTourTypeChange: (String) -> Unit, // ADD THIS CALLBACK
     onSave: (TripDetail) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -2829,16 +2981,34 @@ fun TripDetailEditDialog(
     var travelMode by remember { mutableStateOf(tripDetail.TravelMode) }
     var km by remember { mutableStateOf(tripDetail.km) }
     var particular by remember { mutableStateOf(tripDetail.Particular) }
-    var nightHalt by remember { mutableStateOf(tripDetail.NightHalt == "yes") }
+
+    // ADD TRAVEL TYPE STATE
+    var travelType by remember { mutableStateOf(tripDetail.travel_type) }
+    var travelTypeExpanded by remember { mutableStateOf(false) }
+    val travelTypeOptions = listOf("Local", "Outside")
+
+    // CHANGED: Store the actual string value instead of boolean
+    var selectedNightHalt by remember {
+        mutableStateOf(
+            when (tripDetail.NightHalt) {
+                "At Hotel", "At Customer Site" -> tripDetail.NightHalt
+                else -> "No"
+            }
+        )
+    }
+
     var selectedLocation by remember { mutableStateOf(tripDetail.Location) }
     var expanded by remember { mutableStateOf(false) }
     val tourTypeOptions = listOf("Local", "Outside")
-    var tourType by rememberSaveable { mutableStateOf(currentTour?.TourType ?: "Local") }
 
     var showTimePicker by remember { mutableStateOf(false) }
     var timeField by remember { mutableStateOf("") }
     var showDatePicker by remember { mutableStateOf(false) }
     var dateField by remember { mutableStateOf("") }
+    var travelModeExpanded by remember { mutableStateOf(false) }
+
+    val nightHaltOptions = listOf("No", "At Hotel", "At Customer Site")
+    var nightHaltExpanded by remember { mutableStateOf(false) }
 
     if (showTimePicker) {
         TimePickerDialog(
@@ -2969,13 +3139,46 @@ fun TripDetailEditDialog(
                 }
 
                 // THESE FIELDS SHOULD REMAIN EDITABLE (KEEP FUNCTIONAL onValueChange):
-                OutlinedTextField(
-                    value = travelMode,
-                    onValueChange = { travelMode = it },
-                    label = { Text("Travel Mode *") },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Car, Train, Flight, etc.") }
-                )
+                // ADD THIS DROPDOWN INSTEAD:
+                ExposedDropdownMenuBox(
+                    expanded = travelModeExpanded,
+                    onExpandedChange = { travelModeExpanded = !travelModeExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = travelMode,
+                        onValueChange = { /* DO NOTHING - READ ONLY */ },
+                        label = { Text("Travel Mode *") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = travelModeExpanded)
+                        },
+                        readOnly = true,
+                        placeholder = { Text("Select travel mode") }
+                    )
+                    ExposedDropdownMenu(
+                        expanded = travelModeExpanded,
+                        onDismissRequest = { travelModeExpanded = false }
+                    ) {
+                        if (travelModes.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("No travel modes available") },
+                                onClick = { travelModeExpanded = false }
+                            )
+                        } else {
+                            travelModes.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = { Text(mode.TravelMode) },
+                                    onClick = {
+                                        travelMode = mode.TravelMode
+                                        travelModeExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
 
                 OutlinedTextField(
                     value = km,
@@ -3037,16 +3240,16 @@ fun TripDetailEditDialog(
                 }
 
                 ExposedDropdownMenuBox(
-                    expanded = expanded,
-                    onExpandedChange = { expanded = !expanded }
+                    expanded = travelTypeExpanded,
+                    onExpandedChange = { travelTypeExpanded = !travelTypeExpanded }
                 ) {
                     OutlinedTextField(
-                        value = tourType,
+                        value = travelType,
                         onValueChange = {},
-                            readOnly = true,
-                        label = { Text("Tour Type") },
+                        readOnly = true,
+                        label = { Text("Travel Type") },
                         trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = travelTypeExpanded)
                         },
                         modifier = Modifier
                             .menuAnchor()
@@ -3054,41 +3257,63 @@ fun TripDetailEditDialog(
                     )
 
                     ExposedDropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false }
+                        expanded = travelTypeExpanded,
+                        onDismissRequest = { travelTypeExpanded = false }
                     ) {
-                        tourTypeOptions.forEach { type ->
+                        travelTypeOptions.forEach { type ->
                             DropdownMenuItem(
                                 text = { Text(type) },
                                 onClick = {
-                                    tourType = type
-                                    expanded = false
+                                    travelType = type
+                                    travelTypeExpanded = false
                                 }
                             )
                         }
                     }
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
+                // UPDATED: Night Halt Dropdown - Use actual string values
+                ExposedDropdownMenuBox(
+                    expanded = nightHaltExpanded,
+                    onExpandedChange = { nightHaltExpanded = !nightHaltExpanded }
                 ) {
-                    Checkbox(
-                        checked = nightHalt,
-                        onCheckedChange = { nightHalt = it }
+                    OutlinedTextField(
+                        value = selectedNightHalt,
+                        onValueChange = { /* DO NOTHING - READ ONLY */ },
+                        label = { Text("Night Halt") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = nightHaltExpanded)
+                        },
+                        readOnly = true,
+                        placeholder = { Text("Select night halt option") }
                     )
-                    Text("Night Halt")
+                    ExposedDropdownMenu(
+                        expanded = nightHaltExpanded,
+                        onDismissRequest = { nightHaltExpanded = false }
+                    ) {
+                        nightHaltOptions.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option) },
+                                onClick = {
+                                    selectedNightHalt = option
+                                    nightHaltExpanded = false
+                                }
+                            )
+                        }
+                    }
                 }
 
-                Text(
-                    "* Required fields",
-                    style = typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
+
             }
         },
         confirmButton = {
             Button(
                 onClick = {
+
+                    Log.d("name", "TripDetailEditDialog: ${tourType} ")
                     if (travelDate.isNotEmpty() && travelFrom.isNotEmpty() &&
                         travelTo.isNotEmpty() && travelMode.isNotEmpty() &&
                         km.isNotEmpty() && selectedLocation.isNotEmpty()) {
@@ -3100,8 +3325,10 @@ fun TripDetailEditDialog(
                                 TravelMode = travelMode,
                                 km = km,
                                 Particular = particular,
-                                NightHalt = if (nightHalt) "yes" else "no",
-                                Location = selectedLocation
+                                // CHANGED: Send the actual selected string value
+                                NightHalt = selectedNightHalt,
+                                Location = selectedLocation,
+                                travel_type = travelType // ADD THIS
                             )
                         )
                     }
@@ -3473,29 +3700,27 @@ fun TripDetailItem(
                     color = MaterialTheme.colorScheme.primary
                 )
 
-                Row {
-                    IconButton(
-                        onClick = { onEdit(detail) },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Edit,
-                            contentDescription = "Edit",
-                            modifier = Modifier.size(16.dp)
+                // ADD TRAVEL TYPE BADGE
+                FilterChip(
+                    selected = false,
+                    onClick = { },
+                    label = {
+                        Text(
+                            detail.travel_type ?: "Local",
+                            style = MaterialTheme.typography.labelSmall
                         )
-                    }
-                    IconButton(
-                        onClick = onRemove,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = "Remove",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = when (detail.travel_type) {
+                            "Outside" -> Color(0xFFFFF3E0) // Orange for Outside
+                            else -> Color(0xFFE3F2FD) // Blue for Local
+                        },
+                        labelColor = when (detail.travel_type) {
+                            "Outside" -> Color(0xFFFF9800)
+                            else -> Color(0xFF2196F3)
+                        }
+                    )
+                )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -3550,12 +3775,41 @@ fun TripDetailItem(
                 )
             }
 
-            if (detail.NightHalt == "yes") {
+            if (detail.NightHalt == "yes" || detail.NightHalt == "At Customer Site" || detail.NightHalt == "At Hotel") {
                 Text(
-                    text = "🌙 Night Halt",
+                    text = "🌙 ${detail.NightHalt}",
                     style = typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                IconButton(
+                    onClick = { onEdit(detail) },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Edit",
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                IconButton(
+                    onClick = onRemove,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Remove",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
             }
         }
     }
@@ -3630,6 +3884,11 @@ fun ServerSetupScreen(
     val focusManager = LocalFocusManager.current
     var code by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+
+    // Get device ID
+    val deviceId = remember {
+        (ctx as? MainActivity)?.getDeviceIdForDisplay() ?: "Unknown"
+    }
 
     val backgroundPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -3791,6 +4050,61 @@ fun ServerSetupScreen(
                     )
                 }
             }
+
+            // ADD DEVICE ID DISPLAY BELOW CONTINUE BUTTON
+            Spacer(modifier = Modifier.height(16.dp))
+            DeviceIdDisplayCompact(deviceId = deviceId)
+        }
+    }
+}
+
+// Compact version for ServerSetupScreen
+@Composable
+fun DeviceIdDisplayCompact(deviceId: String, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+        ),
+        elevation = CardDefaults.cardElevation(0.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PhoneAndroid,
+                    contentDescription = "Device ID",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Device ID:",
+                    style = typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = deviceId,
+                style = typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "",
+                style = typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }
@@ -3942,8 +4256,11 @@ fun LoginScreen(
                                     .addConverterFactory(GsonConverterFactory.create())
                                     .build()
                                     .create(ApiService::class.java)
-                                val res = retrofit.login(LoginRequest(user, pass,deviceIdentifier))
-                                Log.d("LoginScreen", "Sending login request: $user,$pass,$deviceIdentifier")
+                                val res = retrofit.login(LoginRequest(user, pass, deviceIdentifier))
+                                Log.d(
+                                    "LoginScreen",
+                                    "Sending login request: $user,$pass,$deviceIdentifier"
+                                )
                                 val name = res.data?.firstOrNull()?.staf_nm
                                 val staffData = res.data?.firstOrNull()
                                 if (res.status == "success" && name != null) {
