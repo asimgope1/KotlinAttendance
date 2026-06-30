@@ -2707,7 +2707,7 @@ fun TourFormScreen(
                             onEdit = { editingExpenseIndex = index },
                             onFileSelect = {
                                 editingExpenseIndex = index
-                                filePickerLauncher.launch("application/pdf")
+                                filePickerLauncher.launch("*/*")
                             },
                             onRemove = {
                                 expenseDetails = expenseDetails.toMutableList().apply { removeAt(index) }
