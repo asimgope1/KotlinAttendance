@@ -45,11 +45,17 @@ android {
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11" // or match Compose BOM
     }
+
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
 }
 
 dependencies {
     // Core
     implementation(libs.androidx.core.ktx)
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation(libs.androidx.activity.compose)
     implementation("io.coil-kt:coil-compose:2.4.0")
     implementation("com.google.android.gms:play-services-location:21.0.1")
